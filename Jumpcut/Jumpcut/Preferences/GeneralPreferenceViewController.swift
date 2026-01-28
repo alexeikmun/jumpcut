@@ -107,24 +107,6 @@ final class GeneralPreferenceViewController: NSViewController, PreferencePane {
         }
         return (pasteMenu, pasteBezel)
     }
-
-    private func makeSparkleRow(settings: Settings) -> NSStackView {
-        let autoCheck = settings.checkbox(title: "Automatically check for updates", key: SettingsPath.checkForUpdates)
-        let checkNowButton = NSButton()
-        let delegate = (NSApplication.shared.delegate as? AppDelegate)!
-        checkNowButton.title = "Check Now"
-        checkNowButton.target = delegate
-        checkNowButton.action = #selector(delegate.checkSparkle(sender:))
-        checkNowButton.controlSize = .small
-        checkNowButton.bezelStyle = .rounded
-        let checkRow = NSStackView(views: [autoCheck, checkNowButton])
-        NSLayoutConstraint.activate([
-            autoCheck.leadingAnchor.constraint(greaterThanOrEqualTo: checkRow.leadingAnchor, constant: 0),
-            checkNowButton.trailingAnchor.constraint(greaterThanOrEqualTo: checkRow.trailingAnchor, constant: 0)
-        ])
-        return checkRow
-    }
-
     override func viewDidLoad() {
         let settings = Settings()
         toolbarItemIcon.isTemplate = true
@@ -142,7 +124,6 @@ final class GeneralPreferenceViewController: NSViewController, PreferencePane {
         ])
         let advancedMenuRow = makeAdvancedMenuRow(settings: settings)
         let launchOnLogin = makeLaunchOnLogin(settings: settings)
-        let sparkleRow = makeSparkleRow(settings: settings)
         let bezelToTopRow = makeBezelToTopRow(settings: settings)
 
         let resetRow = makeResetRow()
@@ -150,7 +131,7 @@ final class GeneralPreferenceViewController: NSViewController, PreferencePane {
         let grid = NSStackView(views: [
             pasteMenu, pasteBezel, bezelToTopRow, wrapBezel, stickyBezel,
             advancedMenuRow, makeSeparator(), stepperViews, makeSeparator(),
-            launchOnLogin, sparkleRow, makeSeparator(), resetRow
+            launchOnLogin, makeSeparator(), resetRow
         ])
         grid.orientation = .vertical
         grid.alignment = .leading
@@ -161,7 +142,6 @@ final class GeneralPreferenceViewController: NSViewController, PreferencePane {
             grid.topAnchor.constraint(greaterThanOrEqualTo: self.view.topAnchor, constant: 24),
             grid.widthAnchor.constraint(equalTo: self.view.widthAnchor, constant: -48),
             stepperViews.leadingAnchor.constraint(equalTo: grid.leadingAnchor, constant: 10),
-            sparkleRow.widthAnchor.constraint(equalTo: grid.widthAnchor),
             resetRow.widthAnchor.constraint(equalTo: grid.widthAnchor)
         ])
     }

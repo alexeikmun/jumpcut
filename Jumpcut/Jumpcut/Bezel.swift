@@ -368,29 +368,74 @@ public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSText
         if query.isEmpty {
             searchResults = []
         } else {
-            let lowerQuery = query.localizedLowercase
             let allItems = stack.firstItems(n: stack.count)
             
-            searchResults = allItems.filter { item in
-                return isFuzzyMatch(query: lowerQuery, text: item.fullText.localizedLowercase)
+            let scoredResults = allItems.compactMap { item -> (Clipping, Int)? in
+                if let score = fuzzyScore(query: query, text: item.fullText) {
+                    return (item, score)
+                }
+                return nil
             }
+            
+            searchResults = scoredResults.sorted { $0.1 > $1.1 }.map { $0.0 }
         }
         resultsTableView.reloadData()
     }
     
-    private func isFuzzyMatch(query: String, text: String) -> Bool {
-        if query.isEmpty { return true }
-        var queryIndex = query.startIndex
-        var textIndex = text.startIndex
+    private func fuzzyScore(query: String, text: String) -> Int? {
+        if query.isEmpty { return 0 }
+        let lowerQuery = query.localizedLowercase
+        let lowerText = text.localizedLowercase
         
-        while queryIndex < query.endIndex && textIndex < text.endIndex {
-            if query[queryIndex] == text[textIndex] {
-                queryIndex = query.index(after: queryIndex)
+        var score = 0
+        var queryIndex = lowerQuery.startIndex
+        var textIndex = lowerText.startIndex
+        
+        var matchedIndices: [String.Index] = []
+        
+        // Greedy matching
+        while queryIndex < lowerQuery.endIndex && textIndex < lowerText.endIndex {
+            if lowerQuery[queryIndex] == lowerText[textIndex] {
+                matchedIndices.append(textIndex)
+                queryIndex = lowerQuery.index(after: queryIndex)
             }
-            textIndex = text.index(after: textIndex)
+            textIndex = lowerText.index(after: textIndex)
         }
         
-        return queryIndex == query.endIndex
+        guard queryIndex == lowerQuery.endIndex else { return nil }
+        
+        var consecutiveRun = 0
+        
+        for (i, index) in matchedIndices.enumerated() {
+            score += 10 // Base match
+            
+            // Start of string
+            if index == lowerText.startIndex {
+                score += 10
+            }
+            
+            // Consecutive match
+            if i > 0 {
+                let prevIndex = matchedIndices[i-1]
+                if lowerText.index(after: prevIndex) == index {
+                    consecutiveRun += 1
+                    score += 5 * consecutiveRun
+                } else {
+                    consecutiveRun = 0
+                    score -= 1 // Small penalty for gap
+                }
+            }
+            
+            // Start of word
+            if index > lowerText.startIndex {
+                let prev = lowerText[lowerText.index(before: index)]
+                if prev.isWhitespace || prev.isNewline || prev.isPunctuation {
+                     score += 15
+                }
+            }
+        }
+        
+        return score
     }
     
     // NSTableViewDataSource
@@ -528,6 +573,9 @@ public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSText
     }
 
     public func hide() {
+        if isSearching {
+            toggleSearch()
+        }
         window.orderOut(nil)
         shown = false
     }
