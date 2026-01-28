@@ -44,7 +44,16 @@ public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSText
     private var searchResults: [Clipping] = []
     private var isSearching: Bool = false
     public var onSelect: ((Clipping) -> Void)?
-
+    
+    // Timestamp UI
+    private var timestampLabel: NSTextField!
+    private let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter
+    }()
+    
     // TODO: Add controls for positioning on window -- NB, not part of BezelAppearance
     //      -- Center, Top Left, Top Right, Top Center, Bottom Center
     // TODO: Add controls for positioning main outlet, secondary outlet
@@ -112,9 +121,22 @@ public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSText
             windowCornerRadius: appearance.windowAttributes.cornerRadius
         )
 
+        // Timestamp UI
+        timestampLabel = NSTextField()
+        timestampLabel.translatesAutoresizingMaskIntoConstraints = false
+        timestampLabel.isEditable = false
+        timestampLabel.isSelectable = false
+        timestampLabel.isBordered = false
+        timestampLabel.backgroundColor = .clear
+        timestampLabel.textColor = Bezel.defaultAppearance.outletFontColor.withAlphaComponent(0.6)
+        timestampLabel.font = NSFont.systemFont(ofSize: 10)
+        timestampLabel.alignment = .right
+        
         setupSearchUI()
 
         window.contentView!.addSubview(mainOutlet.embedderView)
+        window.contentView!.addSubview(timestampLabel)
+        
         if let headerStackView = headerStackView {
             window.contentView!.addSubview(headerStackView)
         }
@@ -126,7 +148,13 @@ public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSText
             mainOutlet.embedderView.widthAnchor.constraint(equalToConstant: appearance.outletSize.width),
             mainOutlet.embedderView.heightAnchor.constraint(equalToConstant: appearance.outletSize.height),
             mainOutlet.embedderView.centerXAnchor.constraint(equalTo: window.contentView!.centerXAnchor),
-            mainOutlet.embedderView.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor, constant: -10)
+            // Adjust main outlet to make room for timestamp
+            mainOutlet.embedderView.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor, constant: -20),
+            
+            // Timestamp constraints
+            timestampLabel.trailingAnchor.constraint(equalTo: mainOutlet.embedderView.trailingAnchor),
+            timestampLabel.topAnchor.constraint(equalTo: mainOutlet.embedderView.bottomAnchor, constant: 2),
+            timestampLabel.heightAnchor.constraint(equalToConstant: 15)
         ]
         
         if let headerStackView = headerStackView {
@@ -310,6 +338,14 @@ public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSText
             }
         }
         
+        // Append date
+        let dateStr = "  " + dateFormatter.string(from: item.createdAt)
+        let dateAttrStr = NSAttributedString(string: dateStr, attributes: [
+            .foregroundColor: NSColor.lightGray,
+            .font: NSFont.systemFont(ofSize: 12)
+        ])
+        attrStr.append(dateAttrStr)
+        
         cell.attributedStringValue = attrStr
         return cell
     }
@@ -343,6 +379,10 @@ public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSText
 
     public func setText(text: String) {
         mainOutlet.setText(text: text)
+    }
+    
+    public func setTimestamp(_ date: Date) {
+        timestampLabel.stringValue = dateFormatter.string(from: date)
     }
 
     public func setSecondaryText(text: String) {

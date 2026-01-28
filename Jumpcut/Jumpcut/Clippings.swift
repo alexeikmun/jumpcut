@@ -34,6 +34,7 @@ struct JCListItem: Codable {
     let Contents: String
     let Position: Int
     let `Type`: String
+    let CreatedAt: Date?
 }
 // swiftlint:enable identifier_name
 
@@ -148,10 +149,23 @@ public class Clipping: NSObject {
     public let fullText: String
     public var shortenedText: String
     public var length: Int
+    public let createdAt: Date
     private let defaultLength = 40
 
     init(string: String) {
         fullText = string
+        createdAt = Date()
+        length = defaultLength
+        shortenedText = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+        shortenedText = shortenedText.components(separatedBy: .newlines)[0]
+        if shortenedText.count > length {
+            shortenedText = String(shortenedText.prefix(length)) + "…"
+        }
+    }
+    
+    init(string: String, date: Date) {
+        fullText = string
+        createdAt = date
         length = defaultLength
         shortenedText = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
         shortenedText = shortenedText.components(separatedBy: .newlines)[0]
@@ -247,7 +261,11 @@ private class ClippingStore: NSObject {
                         in: .whitespacesAndNewlines
                     ).isEmpty
                     if !clipIsEmpty || allowWhitespace {
-                        self.add(item: clipDict.Contents)
+                        if let date = clipDict.CreatedAt {
+                            self.add(item: clipDict.Contents, date: date)
+                        } else {
+                            self.add(item: clipDict.Contents)
+                        }
                     }
                 }
             } catch {
@@ -267,7 +285,7 @@ private class ClippingStore: NSObject {
         var items: [JCListItem] = []
         var counter = 0
         for clip in clippings {
-            items.append(JCListItem(Contents: clip.fullText, Position: counter, Type: "NSStringPboardType"))
+            items.append(JCListItem(Contents: clip.fullText, Position: counter, Type: "NSStringPboardType", CreatedAt: clip.createdAt))
             counter += 1
         }
         let data = JCEngine(
@@ -288,6 +306,15 @@ private class ClippingStore: NSObject {
 
     func add(item: String) {
         clippings.insert(Clipping(string: item), at: 0)
+        if clippings.count > maxLength {
+            clippings.removeLast()
+        }
+        // TK: When we have SQLite backing, we'll want to change this.
+        writeClippings()
+    }
+    
+    func add(item: String, date: Date) {
+        clippings.insert(Clipping(string: item, date: date), at: 0)
         if clippings.count > maxLength {
             clippings.removeLast()
         }

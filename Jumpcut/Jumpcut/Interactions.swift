@@ -210,6 +210,7 @@ public class Interactions: NSObject {
         displayPos = position + 1
         bezel.setText(text: text)
         bezel.setSecondaryText(text: String(displayPos))
+        bezel.setTimestamp(item!.createdAt)
         if !bezel.shown {
             bezel.show()
         }
