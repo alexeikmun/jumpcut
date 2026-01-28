@@ -283,6 +283,12 @@ public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSText
         resultsScrollView.layer?.borderColor = Bezel.defaultAppearance.mainOutletAttributes.borderColor.cgColor
     }
 
+    public func startSearch() {
+        if !isSearching {
+            toggleSearch()
+        }
+    }
+
     @objc private func toggleSearch() {
         isSearching = !isSearching
         searchField.isHidden = !isSearching

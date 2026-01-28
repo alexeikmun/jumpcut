@@ -262,6 +262,8 @@ public class Interactions: NSObject {
             } else {
                 displayBezelAtPosition(position: self.stack.position)
             }
+        case .f:
+            bezel.startSearch()
         default:
             break
         }
