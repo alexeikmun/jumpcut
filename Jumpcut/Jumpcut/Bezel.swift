@@ -25,7 +25,7 @@ public struct AppearanceAttributes {
     let cornerRadius: Double
 }
 
-public class Bezel {
+public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
 
     let window: KeyCaptureWindow
     var shown: Bool = false
@@ -33,6 +33,17 @@ public class Bezel {
 
     fileprivate var mainOutlet: Outlet
     fileprivate var secondaryOutlet: Outlet? // Used for display of stack number
+
+    // Search UI
+    public var stack: ClippingStack?
+    private var searchButton: NSButton!
+    private var searchField: NSTextField!
+    private var headerStackView: NSStackView!
+    private var resultsScrollView: NSScrollView!
+    private var resultsTableView: NSTableView!
+    private var searchResults: [Clipping] = []
+    private var isSearching: Bool = false
+    public var onSelect: ((Clipping) -> Void)?
 
     // TODO: Add controls for positioning on window -- NB, not part of BezelAppearance
     //      -- Center, Top Left, Top Right, Top Center, Bottom Center
@@ -76,7 +87,7 @@ public class Bezel {
         )
     }
 
-    public init() {
+    override public init() {
         let appearance = Bezel.defaultAppearance
         window = KeyCaptureWindow(contentRect: NSRect(origin: .zero, size: appearance.bezelSize),
                                   styleMask: .borderless, backing: .buffered, defer: true)
@@ -92,44 +103,227 @@ public class Bezel {
         } else {
             secondaryOutlet = nil
         }
+        
+        super.init()
+        
         buildWindow(
             windowAlpha: appearance.windowAlpha,
             windowBackgroundColor: appearance.windowAttributes.backgroundColor,
             windowCornerRadius: appearance.windowAttributes.cornerRadius
         )
+
+        setupSearchUI()
+
         window.contentView!.addSubview(mainOutlet.embedderView)
-        if secondaryOutlet != nil {
-            window.contentView!.addSubview(secondaryOutlet!.embedderView)
+        if let headerStackView = headerStackView {
+            window.contentView!.addSubview(headerStackView)
         }
+        
+        // Add results view
+        window.contentView!.addSubview(resultsScrollView)
+
         var constraints = [
             mainOutlet.embedderView.widthAnchor.constraint(equalToConstant: appearance.outletSize.width),
             mainOutlet.embedderView.heightAnchor.constraint(equalToConstant: appearance.outletSize.height),
             mainOutlet.embedderView.centerXAnchor.constraint(equalTo: window.contentView!.centerXAnchor),
             mainOutlet.embedderView.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor, constant: -10)
         ]
-        if secondaryOutlet != nil {
-            constraints.append(
-                secondaryOutlet!.embedderView.widthAnchor.constraint(
-                    equalToConstant: appearance.secondaryOutletSize!.width
-                )
-            )
-            constraints.append(
-                secondaryOutlet!.embedderView.heightAnchor.constraint(
-                    equalToConstant: appearance.secondaryOutletSize!.height
-                )
-            )
-            constraints.append(
-                secondaryOutlet!.embedderView.centerXAnchor.constraint(
-                    equalTo: window.contentView!.centerXAnchor
-                )
-            )
-            constraints.append(
-                secondaryOutlet!.embedderView.bottomAnchor.constraint(
-                    equalTo: mainOutlet.embedderView.topAnchor, constant: -10
-                )
-            )
+        
+        if let headerStackView = headerStackView {
+            constraints.append(contentsOf: [
+                headerStackView.centerXAnchor.constraint(equalTo: window.contentView!.centerXAnchor),
+                headerStackView.bottomAnchor.constraint(equalTo: mainOutlet.embedderView.topAnchor, constant: -10),
+                headerStackView.heightAnchor.constraint(equalToConstant: appearance.secondaryOutletSize?.height ?? 30)
+            ])
         }
+        
+        // Results View Constraints (matches main outlet)
+        constraints.append(contentsOf: [
+            resultsScrollView.leadingAnchor.constraint(equalTo: mainOutlet.embedderView.leadingAnchor),
+            resultsScrollView.trailingAnchor.constraint(equalTo: mainOutlet.embedderView.trailingAnchor),
+            resultsScrollView.topAnchor.constraint(equalTo: mainOutlet.embedderView.topAnchor),
+            resultsScrollView.bottomAnchor.constraint(equalTo: mainOutlet.embedderView.bottomAnchor)
+        ])
+
         NSLayoutConstraint.activate(constraints)
+    }
+
+    private func setupSearchUI() {
+        // Search Button
+        searchButton = NSButton()
+        searchButton.translatesAutoresizingMaskIntoConstraints = false
+        searchButton.bezelStyle = .inline
+        searchButton.isBordered = false
+        if #available(OSX 10.12, *) {
+             searchButton.image = NSImage(named: NSImage.touchBarSearchTemplateName)
+        } else {
+             searchButton.title = "🔍"
+        }
+        searchButton.target = self
+        searchButton.action = #selector(toggleSearch)
+        searchButton.widthAnchor.constraint(equalToConstant: 20).isActive = true
+        searchButton.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        
+        // Search Field
+        searchField = NSTextField()
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        searchField.isHidden = true
+        searchField.delegate = self
+        searchField.focusRingType = .none
+        searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 100).isActive = true
+        searchField.placeholderString = "Search..."
+        
+        // Header Stack View
+        headerStackView = NSStackView()
+        headerStackView.translatesAutoresizingMaskIntoConstraints = false
+        headerStackView.orientation = .horizontal
+        headerStackView.spacing = 8
+        headerStackView.alignment = .centerY
+        
+        if let secondaryOutlet = secondaryOutlet {
+            let appearance = Bezel.defaultAppearance
+            if let size = appearance.secondaryOutletSize {
+                secondaryOutlet.embedderView.widthAnchor.constraint(equalToConstant: size.width).isActive = true
+                secondaryOutlet.embedderView.heightAnchor.constraint(equalToConstant: size.height).isActive = true
+            }
+            headerStackView.addArrangedSubview(secondaryOutlet.embedderView)
+        }
+        
+        headerStackView.addArrangedSubview(searchButton)
+        headerStackView.addArrangedSubview(searchField)
+        
+        // Results Table View
+        resultsTableView = NSTableView()
+        resultsTableView.headerView = nil
+        resultsTableView.dataSource = self
+        resultsTableView.delegate = self
+        resultsTableView.backgroundColor = NSColor(calibratedWhite: 0.1, alpha: 0.9)
+        resultsTableView.rowHeight = 24
+        
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("ResultColumn"))
+        column.width = Bezel.defaultAppearance.outletSize.width
+        resultsTableView.addTableColumn(column)
+        
+        resultsScrollView = NSScrollView()
+        resultsScrollView.translatesAutoresizingMaskIntoConstraints = false
+        resultsScrollView.documentView = resultsTableView
+        resultsScrollView.hasVerticalScroller = true
+        resultsScrollView.drawsBackground = false
+        resultsScrollView.isHidden = true
+        
+        resultsScrollView.wantsLayer = true
+        resultsScrollView.layer?.cornerRadius = Bezel.defaultAppearance.mainOutletAttributes.cornerRadius
+        resultsScrollView.layer?.masksToBounds = true
+        resultsScrollView.layer?.borderWidth = Bezel.defaultAppearance.mainOutletAttributes.borderWidth
+        resultsScrollView.layer?.borderColor = Bezel.defaultAppearance.mainOutletAttributes.borderColor.cgColor
+    }
+
+    @objc private func toggleSearch() {
+        isSearching = !isSearching
+        searchField.isHidden = !isSearching
+        
+        if #available(OSX 10.12, *) {
+            searchButton.image = isSearching ? NSImage(named: NSImage.touchBarIconViewTemplateName) : NSImage(named: NSImage.touchBarSearchTemplateName)
+        }
+        
+        if isSearching {
+            resultsScrollView.isHidden = false
+            mainOutlet.embedderView.isHidden = true
+            window.makeFirstResponder(searchField)
+            filterResults(query: searchField.stringValue)
+        } else {
+            resultsScrollView.isHidden = true
+            mainOutlet.embedderView.isHidden = false
+            searchField.stringValue = ""
+            window.makeFirstResponder(window)
+        }
+    }
+    
+    public func controlTextDidChange(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField, field == searchField else { return }
+        filterResults(query: field.stringValue)
+    }
+    
+    private func filterResults(query: String) {
+        guard let stack = stack else { return }
+        if query.isEmpty {
+            searchResults = []
+        } else {
+            let lowerQuery = query.localizedLowercase
+            let allItems = stack.firstItems(n: stack.count)
+            
+            searchResults = allItems.filter { item in
+                return isFuzzyMatch(query: lowerQuery, text: item.fullText.localizedLowercase)
+            }
+        }
+        resultsTableView.reloadData()
+    }
+    
+    private func isFuzzyMatch(query: String, text: String) -> Bool {
+        if query.isEmpty { return true }
+        var queryIndex = query.startIndex
+        var textIndex = text.startIndex
+        
+        while queryIndex < query.endIndex && textIndex < text.endIndex {
+            if query[queryIndex] == text[textIndex] {
+                queryIndex = query.index(after: queryIndex)
+            }
+            textIndex = text.index(after: textIndex)
+        }
+        
+        return queryIndex == query.endIndex
+    }
+    
+    // NSTableViewDataSource
+    public func numberOfRows(in tableView: NSTableView) -> Int {
+        return searchResults.count
+    }
+    
+    // NSTableViewDelegate
+    public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let item = searchResults[row]
+        let cell = NSTextField()
+        cell.isEditable = false
+        cell.isBordered = false
+        cell.backgroundColor = .clear
+        
+        // Highlight logic
+        let attrStr = NSMutableAttributedString(string: item.shortenedText)
+        attrStr.addAttribute(.foregroundColor, value: NSColor.white, range: NSRange(location: 0, length: attrStr.length))
+        attrStr.addAttribute(.font, value: NSFont.systemFont(ofSize: 14), range: NSRange(location: 0, length: attrStr.length))
+        
+        let query = searchField.stringValue.localizedLowercase
+        let text = item.shortenedText.localizedLowercase
+        
+        if !query.isEmpty {
+            var queryIndex = query.startIndex
+            var textIndex = text.startIndex
+            
+            while queryIndex < query.endIndex && textIndex < text.endIndex {
+                if query[queryIndex] == text[textIndex] {
+                    let range = NSRange(textIndex...textIndex, in: text)
+                    attrStr.addAttribute(.font, value: NSFont.boldSystemFont(ofSize: 14), range: range)
+                    attrStr.addAttribute(.foregroundColor, value: NSColor.yellow, range: range)
+                    queryIndex = query.index(after: queryIndex)
+                }
+                textIndex = text.index(after: textIndex)
+            }
+        }
+        
+        cell.attributedStringValue = attrStr
+        return cell
+    }
+    
+    public func tableViewSelectionDidChange(_ notification: Notification) {
+        let row = resultsTableView.selectedRow
+        guard row >= 0 && row < searchResults.count else { return }
+        let item = searchResults[row]
+        
+        // Use async to allow UI to update if needed, but mainly to call the handler
+        DispatchQueue.main.async {
+            self.onSelect?(item)
+            self.toggleSearch() // Close search
+        }
     }
 
     public func shouldSelectionPaste() -> Bool {

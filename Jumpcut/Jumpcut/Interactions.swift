@@ -25,7 +25,41 @@ public class Interactions: NSObject {
         self.stack = stack
         self.menu = menu
         self.bezel = bezel
+        self.bezel.stack = stack
         self.delegate = (NSApplication.shared.delegate as? AppDelegate)!
+        super.init()
+        
+        self.bezel.onSelect = { [weak self] clipping in
+            guard let self = self else { return }
+            
+            if self.bezel.shouldSelectionPaste() {
+                self.paste(clipping)
+            } else {
+                self.place(clipping)
+            }
+            
+            // Find position to handle move-to-top preference
+            var position = -1
+            for i in 0..<self.stack.count {
+                if self.stack.itemAt(position: i) === clipping {
+                    position = i
+                    break
+                }
+            }
+            
+            if position >= 0 {
+                let moveToTop = UserDefaults.standard.value(
+                    forKey: SettingsPath.moveClippingsAfterUse.rawValue
+                ) as? Bool ?? false
+                if moveToTop {
+                    self.stack.moveItemToTop(position: position)
+                    self.stack.position = 0
+                    self.menu.rebuild(stack: self.stack)
+                } else {
+                    self.stack.position = position
+                }
+            }
+        }
     }
 
     // HOTKEY
