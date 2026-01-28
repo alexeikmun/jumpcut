@@ -54,6 +54,10 @@ public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSText
         return formatter
     }()
     
+    // Preview UI
+    private var previewScrollView: NSScrollView!
+    private var previewTextView: NSTextView!
+    
     // TODO: Add controls for positioning on window -- NB, not part of BezelAppearance
     //      -- Center, Top Left, Top Right, Top Center, Bottom Center
     // TODO: Add controls for positioning main outlet, secondary outlet
@@ -133,6 +137,7 @@ public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSText
         timestampLabel.alignment = .right
         
         setupSearchUI()
+        setupPreviewUI()
 
         window.contentView!.addSubview(mainOutlet.embedderView)
         window.contentView!.addSubview(timestampLabel)
@@ -143,6 +148,7 @@ public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSText
         
         // Add results view
         window.contentView!.addSubview(resultsScrollView)
+        window.contentView!.addSubview(previewScrollView)
 
         var constraints = [
             mainOutlet.embedderView.widthAnchor.constraint(equalToConstant: appearance.outletSize.width),
@@ -165,15 +171,46 @@ public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSText
             ])
         }
         
-        // Results View Constraints (matches main outlet)
+        // Results View Constraints (matches main outlet initially)
         constraints.append(contentsOf: [
-            resultsScrollView.leadingAnchor.constraint(equalTo: mainOutlet.embedderView.leadingAnchor),
-            resultsScrollView.trailingAnchor.constraint(equalTo: mainOutlet.embedderView.trailingAnchor),
+            resultsScrollView.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor, constant: 12),
+            resultsScrollView.widthAnchor.constraint(equalToConstant: appearance.outletSize.width),
             resultsScrollView.topAnchor.constraint(equalTo: mainOutlet.embedderView.topAnchor),
             resultsScrollView.bottomAnchor.constraint(equalTo: mainOutlet.embedderView.bottomAnchor)
         ])
+        
+        // Preview View Constraints
+        constraints.append(contentsOf: [
+            previewScrollView.leadingAnchor.constraint(equalTo: resultsScrollView.trailingAnchor, constant: 10),
+            previewScrollView.widthAnchor.constraint(equalToConstant: appearance.outletSize.width),
+            previewScrollView.topAnchor.constraint(equalTo: resultsScrollView.topAnchor),
+            previewScrollView.bottomAnchor.constraint(equalTo: resultsScrollView.bottomAnchor)
+        ])
 
         NSLayoutConstraint.activate(constraints)
+    }
+
+    private func setupPreviewUI() {
+        previewTextView = NSTextView()
+        previewTextView.isEditable = false
+        previewTextView.isSelectable = true
+        previewTextView.backgroundColor = NSColor(calibratedWhite: 0.1, alpha: 0.9)
+        previewTextView.textColor = .white
+        previewTextView.font = NSFont.systemFont(ofSize: 14)
+        previewTextView.textContainerInset = NSSize(width: 5, height: 5)
+        
+        previewScrollView = NSScrollView()
+        previewScrollView.translatesAutoresizingMaskIntoConstraints = false
+        previewScrollView.documentView = previewTextView
+        previewScrollView.hasVerticalScroller = true
+        previewScrollView.drawsBackground = false
+        previewScrollView.isHidden = true
+        
+        previewScrollView.wantsLayer = true
+        previewScrollView.layer?.cornerRadius = Bezel.defaultAppearance.mainOutletAttributes.cornerRadius
+        previewScrollView.layer?.masksToBounds = true
+        previewScrollView.layer?.borderWidth = Bezel.defaultAppearance.mainOutletAttributes.borderWidth
+        previewScrollView.layer?.borderColor = Bezel.defaultAppearance.mainOutletAttributes.borderColor.cgColor
     }
 
     private func setupSearchUI() {
@@ -256,15 +293,69 @@ public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSText
         
         if isSearching {
             resultsScrollView.isHidden = false
+            previewScrollView.isHidden = false
             mainOutlet.embedderView.isHidden = true
+            
+            // Resize window for split view
+            let appearance = Bezel.defaultAppearance
+            let newWidth = appearance.bezelSize.width * 2 // Double the width
+            setWindowSize(size: CGSize(width: newWidth, height: appearance.bezelSize.height))
+            window.center() // Recenter window
+            
             window.makeFirstResponder(searchField)
             filterResults(query: searchField.stringValue)
         } else {
             resultsScrollView.isHidden = true
+            previewScrollView.isHidden = true
             mainOutlet.embedderView.isHidden = false
+            
+            // Restore window size
+            let appearance = Bezel.defaultAppearance
+            setWindowSize(size: appearance.bezelSize)
+            window.center()
+            
             searchField.stringValue = ""
             window.makeFirstResponder(window)
         }
+    }
+    
+    public func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control == searchField else { return false }
+        
+        if commandSelector == #selector(NSResponder.moveDown(_:)) {
+            let row = resultsTableView.selectedRow
+            let nextRow = row + 1
+            if nextRow < searchResults.count {
+                resultsTableView.selectRowIndexes(IndexSet(integer: nextRow), byExtendingSelection: false)
+                resultsTableView.scrollRowToVisible(nextRow)
+            } else if row == -1 && searchResults.count > 0 {
+                resultsTableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+                resultsTableView.scrollRowToVisible(0)
+            }
+            return true
+        } else if commandSelector == #selector(NSResponder.moveUp(_:)) {
+            let row = resultsTableView.selectedRow
+            let prevRow = row - 1
+            if prevRow >= 0 {
+                resultsTableView.selectRowIndexes(IndexSet(integer: prevRow), byExtendingSelection: false)
+                resultsTableView.scrollRowToVisible(prevRow)
+            }
+            return true
+        } else if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            // Handle Enter key
+            let row = resultsTableView.selectedRow
+            if row >= 0 && row < searchResults.count {
+                onSelect?(searchResults[row])
+                toggleSearch()
+            }
+            return true
+        } else if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            // Handle Escape key
+            toggleSearch()
+            return true
+        }
+        
+        return false
     }
     
     public func controlTextDidChange(_ obj: Notification) {
@@ -352,14 +443,17 @@ public class Bezel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSText
     
     public func tableViewSelectionDidChange(_ notification: Notification) {
         let row = resultsTableView.selectedRow
-        guard row >= 0 && row < searchResults.count else { return }
-        let item = searchResults[row]
-        
-        // Use async to allow UI to update if needed, but mainly to call the handler
-        DispatchQueue.main.async {
-            self.onSelect?(item)
-            self.toggleSearch() // Close search
+        guard row >= 0 && row < searchResults.count else {
+            previewTextView.string = ""
+            return
         }
+        let item = searchResults[row]
+        previewTextView.string = item.fullText
+        setTimestamp(item.createdAt)
+    }
+    
+    public func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        return true
     }
 
     public func shouldSelectionPaste() -> Bool {
